@@ -3,7 +3,7 @@ version: "3.7"
 services:
   zookeeper:
     container_name: zookeeper
-    image: confluentinc/cp-zookeeper:5.4.0
+    image: confluentinc/cp-zookeeper:${CONFLUENT_VERSION}
     networks:
       - kafka
     environment:
@@ -16,7 +16,7 @@ services:
 
   kafka:
     container_name: kafka
-    image: confluentinc/cp-server:5.4.0
+    image: confluentinc/cp-server:${CONFLUENT_VERSION}
     depends_on:
       - zookeeper
     ports:
@@ -29,7 +29,7 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_HEAP_OPTS: '-Xms1G -Xmx1G'
+      KAFKA_HEAP_OPTS: '-Xms${KAFKA_MEMORY} -Xmx${KAFKA_MEMORY}'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
@@ -50,7 +50,7 @@ services:
 
   control-center:
     container_name: control-center
-    image: confluentinc/cp-enterprise-control-center:5.4.0
+    image: confluentinc/cp-enterprise-control-center:${CONFLUENT_VERSION}
     hostname: control-center
     depends_on:
       - zookeeper
@@ -73,7 +73,7 @@ services:
 
   elasticsearch:
     container_name: elasticsearch
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.0.0-SNAPSHOT
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
     volumes:
       - es-data:/usr/share/elasticsearch/data
     networks:
@@ -88,14 +88,14 @@ services:
       - network.host=elasticsearch,_local_
       - network.publish_host=elasticsearch
       - bootstrap.memory_lock=true
-      - ES_JAVA_OPTS=-Xms1G -Xmx1G
+      - ES_JAVA_OPTS=-Xms${ES_MEMORY} -Xmx${ES_MEMORY}
     ulimits: { nofile: { soft: 65535, hard: 65535 }, memlock: -1 }
     healthcheck:
       test: curl --head --max-time 120 --retry 120 --retry-delay 1 --show-error --silent http://localhost:9200
 
   kibana:
     container_name: kibana
-    image: docker.elastic.co/kibana/kibana:8.0.0-SNAPSHOT
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION}
     depends_on: ['elasticsearch']
     networks:
       - elasticsearch
@@ -106,6 +106,19 @@ services:
       - KIBANA_LOGGING_QUIET=true
     healthcheck:
       test: curl --max-time 120 --retry 120 --retry-delay 1 --show-error --silent http://localhost:5601
+
+  apm_server:
+    container_name: apm_server
+    image: docker.elastic.co/apm/apm-server:${ELASTIC_VERSION}
+    depends_on: ['elasticsearch', 'kibana']
+    command: -e --strict.perms=false
+    networks:
+      - elasticsearch
+    ports:
+      - 8200:8200
+    restart: on-failure
+    healthcheck:
+      test: curl --max-time 120 --retry 120 --retry-delay 1 --show-error --silent http://localhost:8200
 
 networks:
   kafka:
