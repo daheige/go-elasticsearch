@@ -12,6 +12,8 @@ import (
 
 	"github.com/segmentio/kafka-go"
 
+	"go.elastic.co/apm"
+
 	"github.com/elastic/go-elasticsearch/v8/esutil"
 )
 
@@ -45,14 +47,13 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 	})
 
 	for {
-		msg, err := c.reader.ReadMessage(context.Background())
+		msg, err := c.reader.ReadMessage(ctx)
 		if err != nil {
 			return fmt.Errorf("reader: %s", err)
 		}
 		// log.Printf("%v/%v/%v:%s\n", msg.Topic, msg.Partition, msg.Offset, string(msg.Value))
 
-		if err := c.Indexer.Add(
-			context.Background(),
+		if err := c.Indexer.Add(ctx,
 			esutil.BulkIndexerItem{
 				Action: "index",
 				Body:   bytes.NewReader(msg.Value),
@@ -61,17 +62,18 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 				},
 				OnFailure: func(item esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem, err error) {
 					if err != nil {
-						// log.Printf("ERROR: %s", err)
+						apm.CaptureError(ctx, err).Send()
 					} else {
-						// log.Printf("ERROR: %s: %s", res.Error.Type, res.Error.Reason)
+						apm.CaptureError(ctx, fmt.Errorf("%s:%s", res.Error.Type, res.Error.Reason)).Send()
 					}
 				},
 			}); err != nil {
+			apm.CaptureError(ctx, err).Send()
 			return fmt.Errorf("indexer: %s", err)
 		}
 	}
 	c.reader.Close()
-	c.Indexer.Close(context.Background())
+	c.Indexer.Close(ctx)
 
 	return nil
 }
