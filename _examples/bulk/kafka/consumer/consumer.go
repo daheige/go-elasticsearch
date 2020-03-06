@@ -57,18 +57,23 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 			esutil.BulkIndexerItem{
 				Action: "index",
 				Body:   bytes.NewReader(msg.Value),
-				OnSuccess: func(item esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem) {
+				OnSuccess: func(ctx context.Context, item esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem) {
 					// log.Printf("Indexed %s/%s", res.Index, res.DocumentID)
 				},
-				OnFailure: func(item esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem, err error) {
+				OnFailure: func(ctx context.Context, item esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem, err error) {
 					if err != nil {
 						apm.CaptureError(ctx, err).Send()
 					} else {
-						apm.CaptureError(ctx, fmt.Errorf("%s:%s", res.Error.Type, res.Error.Reason)).Send()
+						if res.Error.Type != "" {
+							apm.CaptureError(ctx, fmt.Errorf("%s:%s", res.Error.Type, res.Error.Reason)).Send()
+						} else {
+							apm.CaptureError(ctx, fmt.Errorf("%s/%s %s (%d)", res.Index, res.DocumentID, res.Result, res.Status)).Send()
+						}
+
 					}
 				},
 			}); err != nil {
-			apm.CaptureError(ctx, err).Send()
+			apm.DefaultTracer.NewError(err).Send()
 			return fmt.Errorf("indexer: %s", err)
 		}
 	}

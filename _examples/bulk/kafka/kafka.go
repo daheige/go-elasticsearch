@@ -101,7 +101,7 @@ func main() {
 		NumWorkers: numWorkers,
 		FlushBytes: int(flushBytes),
 		Flusher:    &InstrumentedFlusher{flusher: &esutil.BulkIndexerDefaultFlusher{Client: es}},
-		OnError:    func(err error) { indexerError = err; apm.DefaultTracer.NewError(err).Send() },
+		OnError:    func(ctx context.Context, err error) { indexerError = err; apm.DefaultTracer.NewError(err).Send() },
 	})
 	if err != nil {
 		log.Fatalf("ERROR: NewBulkIndexer(): %s", err)
@@ -300,15 +300,16 @@ type InstrumentedFlusher struct {
 	flusher esutil.BulkIndexerFlusher
 }
 
-func (f *InstrumentedFlusher) Flush(ctx context.Context, req esapi.BulkRequest) (*esapi.Response, error) {
+func (f *InstrumentedFlusher) Flush(ctx context.Context, req esapi.BulkRequest) (context.Context, *esapi.Response, error) {
 	txn := apm.DefaultTracer.StartTransaction("Bulk", "indexing")
 	defer txn.End()
 
 	ctx = apm.ContextWithTransaction(ctx, txn)
-	res, err := f.flusher.Flush(ctx, req)
+	ctx, res, err := f.flusher.Flush(ctx, req)
 	if err != nil {
 		apm.CaptureError(ctx, err).Send()
+		return ctx, res, err
 	}
 	txn.Result = res.Status()
-	return res, err
+	return ctx, res, err
 }
