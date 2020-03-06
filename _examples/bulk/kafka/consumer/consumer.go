@@ -55,7 +55,7 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 
 		if err := c.Indexer.Add(ctx,
 			esutil.BulkIndexerItem{
-				Action: "index",
+				Action: "create",
 				Body:   bytes.NewReader(msg.Value),
 				OnSuccess: func(ctx context.Context, item esutil.BulkIndexerItem, res esutil.BulkIndexerResponseItem) {
 					// log.Printf("Indexed %s/%s", res.Index, res.DocumentID)
@@ -65,9 +65,11 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 						apm.CaptureError(ctx, err).Send()
 					} else {
 						if res.Error.Type != "" {
-							apm.CaptureError(ctx, fmt.Errorf("%s:%s", res.Error.Type, res.Error.Reason)).Send()
+							// log.Printf("%s:%s", res.Error.Type, res.Error.Reason)
+							// apm.CaptureError(ctx, fmt.Errorf("%s:%s", res.Error.Type, res.Error.Reason)).Send()
 						} else {
-							apm.CaptureError(ctx, fmt.Errorf("%s/%s %s (%d)", res.Index, res.DocumentID, res.Result, res.Status)).Send()
+							// log.Printf("%s/%s %s (%d)", res.Index, res.DocumentID, res.Result, res.Status)
+							// apm.CaptureError(ctx, fmt.Errorf("%s/%s %s (%d)", res.Index, res.DocumentID, res.Result, res.Status)).Send()
 						}
 
 					}

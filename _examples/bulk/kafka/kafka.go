@@ -24,7 +24,6 @@ import (
 	"github.com/dustin/go-humanize"
 
 	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/elastic/go-elasticsearch/v8/esutil"
 
 	"go.elastic.co/apm"
@@ -100,8 +99,17 @@ func main() {
 		Client:     es,
 		NumWorkers: numWorkers,
 		FlushBytes: int(flushBytes),
-		Flusher:    &InstrumentedFlusher{flusher: &esutil.BulkIndexerDefaultFlusher{Client: es}},
-		OnError:    func(ctx context.Context, err error) { indexerError = err; apm.DefaultTracer.NewError(err).Send() },
+		OnFlushStart: func(ctx context.Context) context.Context {
+			txn := apm.DefaultTracer.StartTransaction("Bulk", "indexing")
+			return apm.ContextWithTransaction(ctx, txn)
+		},
+		OnFlushEnd: func(ctx context.Context) {
+			apm.TransactionFromContext(ctx).End()
+		},
+		OnError: func(ctx context.Context, err error) {
+			indexerError = err
+			apm.CaptureError(ctx, err).Send()
+		},
 	})
 	if err != nil {
 		log.Fatalf("ERROR: NewBulkIndexer(): %s", err)
@@ -294,22 +302,4 @@ func report(
 	currRow++
 
 	return b.String()
-}
-
-type InstrumentedFlusher struct {
-	flusher esutil.BulkIndexerFlusher
-}
-
-func (f *InstrumentedFlusher) Flush(ctx context.Context, req esapi.BulkRequest) (context.Context, *esapi.Response, error) {
-	txn := apm.DefaultTracer.StartTransaction("Bulk", "indexing")
-	defer txn.End()
-
-	ctx = apm.ContextWithTransaction(ctx, txn)
-	ctx, res, err := f.flusher.Flush(ctx, req)
-	if err != nil {
-		apm.CaptureError(ctx, err).Send()
-		return ctx, res, err
-	}
-	txn.Result = res.Status()
-	return ctx, res, err
 }
