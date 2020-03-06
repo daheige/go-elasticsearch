@@ -100,8 +100,8 @@ func main() {
 		Client:     es,
 		NumWorkers: numWorkers,
 		FlushBytes: int(flushBytes),
-		Flusher:    &InstrumentedFlusher{client: es},
-		OnError:    func(err error) { indexerError = err; apm.CaptureError(ctx, err).Send() },
+		Flusher:    &InstrumentedFlusher{flusher: &esutil.BulkIndexerDefaultFlusher{Client: es}},
+		OnError:    func(err error) { indexerError = err; apm.DefaultTracer.NewError(err).Send() },
 	})
 	if err != nil {
 		log.Fatalf("ERROR: NewBulkIndexer(): %s", err)
@@ -296,12 +296,19 @@ func report(
 	return b.String()
 }
 
-type InstrumentedFlusher struct{ client *elasticsearch.Client }
+type InstrumentedFlusher struct {
+	flusher esutil.BulkIndexerFlusher
+}
 
 func (f *InstrumentedFlusher) Flush(ctx context.Context, req esapi.BulkRequest) (*esapi.Response, error) {
 	txn := apm.DefaultTracer.StartTransaction("Bulk", "indexing")
 	defer txn.End()
 
 	ctx = apm.ContextWithTransaction(ctx, txn)
-	return req.Do(ctx, f.client)
+	res, err := f.flusher.Flush(ctx, req)
+	if err != nil {
+		apm.CaptureError(ctx, err).Send()
+	}
+	txn.Result = res.Status()
+	return res, err
 }
