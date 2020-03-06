@@ -45,6 +45,19 @@ var (
 	flushBytes   = 0 // Default
 	numWorkers   = 0 // Default
 	indexerError error
+
+	mapping = `{
+  "mappings": {
+    "properties": {
+    	"time":     { "type": "date"    },
+    	"symbol":   { "type": "keyword" },
+    	"side":     { "type": "keyword" },
+      "account":  { "type": "keyword" },
+      "quantity": { "type": "long"    },
+      "price":    { "type": "long"    },
+      "amount":   { "type": "long"    }
+      }
+    }}}`
 )
 
 func init() {
@@ -93,6 +106,25 @@ func main() {
 		log.Fatalf("Error: NewClient(): %s", err)
 	}
 	expvar.Publish("go-elasticsearch", expvar.Func(func() interface{} { m, _ := es.Metrics(); return m }))
+
+	res, err := es.Indices.Exists([]string{indexName})
+	if err != nil {
+		log.Fatalf("Error: Indices.Exists: %s", err)
+	}
+	res.Body.Close()
+	if res.StatusCode == 404 {
+		res, err := es.Indices.Create(
+			indexName,
+			es.Indices.Create.WithBody(strings.NewReader(mapping)),
+			es.Indices.Create.WithWaitForActiveShards("1"),
+		)
+		if err != nil {
+			log.Fatalf("Error: Indices.Create: %s", err)
+		}
+		if res.IsError() {
+			log.Fatalf("Error: Indices.Create: %s", res)
+		}
+	}
 
 	idx, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
 		Index:      indexName,
