@@ -17,8 +17,11 @@ import (
 
 var (
 	sides    = []string{"BUY", "SELL"}
-	symbols  = []string{"ZBZX", "ZJZZT", "ZTEST", "ZVV", "ZVZZT", "ZWZZT", "ZXZZT"}
-	accounts = []string{"ABC123", "LMN456", "XYZ789"}
+	symbols  = []string{"KBCU", "KBCU", "KBCU", "KJPR", "KJPR", "KSJD", "KXCV", "WRHV", "WTJB", "WMLU"}
+	accounts = []string{"ABC123", "ABC123", "ABC123", "LMN456", "LMN456", "STU789"}
+
+	mean   = 250.0
+	stddev = 50.0
 )
 
 func init() {
@@ -53,18 +56,9 @@ func (p *Producer) Run(ctx context.Context) error {
 
 	for {
 		select {
-		case <-ticker.C:
+		case t := <-ticker.C:
 			for i := 1; i <= p.MessageRate; i++ {
-				var buf bytes.Buffer
-				fmt.Fprintf(&buf,
-					`{"symbol":"%s", "price":%d, "side":"%s", "quantity":%d, "account":"%s"}`,
-					symbols[rand.Intn(len(symbols))],
-					rand.Intn(1000)+5,
-					sides[rand.Intn(len(sides))],
-					rand.Intn(5000)+1,
-					accounts[rand.Intn(len(accounts))],
-				)
-				messages = append(messages, kafka.Message{Value: buf.Bytes()})
+				messages = append(messages, kafka.Message{Value: p.generateMessage(t)})
 			}
 			if err := p.writer.WriteMessages(ctx, messages...); err != nil {
 				messages = messages[:0]
@@ -92,6 +86,61 @@ func (p *Producer) CreateTopic(ctx context.Context) error {
 			NumPartitions:     p.TopicParts,
 			ReplicationFactor: 1,
 		})
+}
+
+func (p *Producer) generateMessage(t time.Time) []byte {
+	var (
+		buf bytes.Buffer
+
+		timestamp time.Time
+		quantity  int
+		price     int
+		amount    int
+		side      string
+		symbol    string
+		account   string
+	)
+
+	timestamp = t
+	if timestamp.Second()%6 == 0 {
+		quantity = rand.Intn(300) + 50
+	} else {
+		quantity = rand.Intn(150) + 10
+	}
+	price = int(mean + stddev*rand.NormFloat64())
+	amount = quantity * price
+	switch {
+	case timestamp.Minute()%5 == 0:
+		side = "SELL"
+	default:
+		if timestamp.Second()%3 == 0 {
+			side = "SELL"
+		} else {
+			side = "BUY"
+		}
+	}
+	if timestamp.Second()%4 == 0 {
+		symbol = "KXCV"
+	} else {
+		symbol = symbols[rand.Intn(len(symbols))]
+	}
+	if timestamp.Minute()%5 == 0 && timestamp.Second() > 30 {
+		account = "STU789"
+	} else {
+		account = accounts[rand.Intn(len(accounts))]
+	}
+
+	fmt.Fprintf(&buf,
+		`{"time":"%s", "symbol":"%s", "side":"%s", "quantity":%d, "price":%d, "amount":%d, "account":"%s"}`,
+		timestamp.UTC().Add(-(time.Duration(rand.Intn(5)) * time.Minute)).Format(time.RFC3339),
+		symbol,
+		side,
+		quantity,
+		price,
+		amount,
+		account,
+	)
+	return buf.Bytes()
 }
 
 type Stats struct {
