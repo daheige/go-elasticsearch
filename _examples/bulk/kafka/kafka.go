@@ -41,7 +41,9 @@ var (
 	msgRate    int
 
 	indexName    = "stocks"
+	numProducers = 1
 	numConsumers = 4
+	numIndexers  = 1
 	flushBytes   = 0 // Default
 	numWorkers   = 0 // Default
 	indexerError error
@@ -67,6 +69,9 @@ func init() {
 		brokerURL = "localhost:9092"
 	}
 	flag.IntVar(&msgRate, "rate", 1000, "Producer rate (msg/sec)")
+	flag.IntVar(&numProducers, "producers", numProducers, "Number of producers")
+	flag.IntVar(&numConsumers, "consumers", numConsumers, "Number of consumers")
+	flag.IntVar(&numIndexers, "indexers", numIndexers, "Number of indexers")
 	flag.Parse()
 }
 
@@ -88,12 +93,14 @@ func main() {
 	signal.Notify(done, os.Interrupt)
 	go func() { <-done; log.Println("\n"); os.Exit(0) }()
 
-	producers = append(producers,
-		&producer.Producer{
-			BrokerURL:   brokerURL,
-			TopicName:   topicName,
-			TopicParts:  topicParts,
-			MessageRate: msgRate})
+	for i := 1; i <= numProducers; i++ {
+		producers = append(producers,
+			&producer.Producer{
+				BrokerURL:   brokerURL,
+				TopicName:   topicName,
+				TopicParts:  topicParts,
+				MessageRate: msgRate})
+	}
 
 	es, err := elasticsearch.NewClient(elasticsearch.Config{
 		RetryOnStatus: []int{502, 503, 504, 429}, // Add 429 to the list of retryable statuses
@@ -126,27 +133,29 @@ func main() {
 		}
 	}
 
-	idx, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
-		Index:      indexName,
-		Client:     es,
-		NumWorkers: numWorkers,
-		FlushBytes: int(flushBytes),
-		OnFlushStart: func(ctx context.Context) context.Context {
-			txn := apm.DefaultTracer.StartTransaction("Bulk", "indexing")
-			return apm.ContextWithTransaction(ctx, txn)
-		},
-		OnFlushEnd: func(ctx context.Context) {
-			apm.TransactionFromContext(ctx).End()
-		},
-		OnError: func(ctx context.Context, err error) {
-			indexerError = err
-			apm.CaptureError(ctx, err).Send()
-		},
-	})
-	if err != nil {
-		log.Fatalf("ERROR: NewBulkIndexer(): %s", err)
+	for i := 1; i <= numIndexers; i++ {
+		idx, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
+			Index:      indexName,
+			Client:     es,
+			NumWorkers: numWorkers,
+			FlushBytes: int(flushBytes),
+			OnFlushStart: func(ctx context.Context) context.Context {
+				txn := apm.DefaultTracer.StartTransaction("Bulk", "indexing")
+				return apm.ContextWithTransaction(ctx, txn)
+			},
+			OnFlushEnd: func(ctx context.Context) {
+				apm.TransactionFromContext(ctx).End()
+			},
+			OnError: func(ctx context.Context, err error) {
+				indexerError = err
+				apm.CaptureError(ctx, err).Send()
+			},
+		})
+		if err != nil {
+			log.Fatalf("ERROR: NewBulkIndexer(): %s", err)
+		}
+		indexers = append(indexers, idx)
 	}
-	indexers = append(indexers, idx)
 
 	for i := 1; i <= numConsumers; i++ {
 		consumers = append(consumers,
@@ -159,7 +168,7 @@ func main() {
 	reporter := time.NewTicker(500 * time.Millisecond)
 	defer reporter.Stop()
 	go func() {
-		fmt.Println("Initializing...")
+		fmt.Printf("Initializing... producers=%d consumers=%d indexers=%d\n", numProducers, numConsumers, numIndexers)
 		for {
 			select {
 			case <-reporter.C:
@@ -179,8 +188,10 @@ func main() {
 		}
 	}()
 
-	if err := producers[0].CreateTopic(ctx); err != nil {
-		log.Fatalf("ERROR: Producer: %s", err)
+	if len(producers) > 0 {
+		if err := producers[0].CreateTopic(ctx); err != nil {
+			log.Fatalf("ERROR: Producer: %s", err)
+		}
 	}
 
 	for _, c := range consumers {
@@ -269,9 +280,8 @@ func report(
 		value = fmt.Sprintf("errors=%s", humanize.Comma(int64(s.TotalErrors)))
 		fmt.Fprintf(&b, " %-*s┃", colWidth-1, value)
 		currRow++
+		divider(i == len(producers)-1)
 	}
-
-	divider(false)
 
 	for i, c := range consumers {
 		fmt.Fprintf(&b, "\033[%d;0H", currRow)
