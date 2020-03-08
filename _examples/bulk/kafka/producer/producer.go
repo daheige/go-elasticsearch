@@ -100,7 +100,11 @@ func (p *Producer) generateMessage(t time.Time) []byte {
 	)
 
 	timestamp = t
-	timeshift = time.Duration(time.Duration(rand.ExpFloat64()/2.0*100) * time.Second)
+	if timestamp.Minute() == 2 {
+		timeshift = -(time.Duration(time.Minute))
+	} else {
+		timeshift = time.Duration(time.Duration(rand.ExpFloat64()/2.0*100) * time.Second)
+	}
 	switch {
 	case timestamp.Minute()%5 == 0:
 		side = "SELL"
@@ -140,7 +144,7 @@ func (p *Producer) generateMessage(t time.Time) []byte {
 
 	fmt.Fprintf(&buf,
 		`{"time":"%s", "symbol":"%s", "side":"%s", "quantity":%d, "price":%d, "amount":%d, "account":"%s"}`,
-		timestamp.UTC().Add(+timeshift).Format(time.RFC3339),
+		timestamp.UTC().Add(timeshift).Format(time.RFC3339),
 		symbol,
 		side,
 		quantity,
