@@ -19,9 +19,6 @@ var (
 	sides    = []string{"BUY", "SELL"}
 	symbols  = []string{"KBCU", "KBCU", "KBCU", "KJPR", "KJPR", "KSJD", "KXCV", "WRHV", "WTJB", "WMLU"}
 	accounts = []string{"ABC123", "ABC123", "ABC123", "LMN456", "LMN456", "STU789"}
-
-	mean   = 250.0
-	stddev = 50.0
 )
 
 func init() {
@@ -93,22 +90,17 @@ func (p *Producer) generateMessage(t time.Time) []byte {
 		buf bytes.Buffer
 
 		timestamp time.Time
+		timeshift time.Duration
+		side      string
 		quantity  int
 		price     int
 		amount    int
-		side      string
 		symbol    string
 		account   string
 	)
 
 	timestamp = t
-	if timestamp.Second()%6 == 0 {
-		quantity = rand.Intn(300) + 50
-	} else {
-		quantity = rand.Intn(150) + 10
-	}
-	price = int(mean + stddev*rand.NormFloat64())
-	amount = quantity * price
+	timeshift = time.Duration(time.Duration(rand.ExpFloat64()/2.0*100) * time.Second)
 	switch {
 	case timestamp.Minute()%5 == 0:
 		side = "SELL"
@@ -119,6 +111,22 @@ func (p *Producer) generateMessage(t time.Time) []byte {
 			side = "BUY"
 		}
 	}
+	switch {
+	case timestamp.Minute()%3 == 0:
+		quantity = rand.Intn(250) + 500
+	case timestamp.Second()%6 == 0:
+		quantity = rand.Intn(300) + 50
+	case timestamp.Second()%12 == 0:
+		quantity = rand.Intn(10) + 1
+	default:
+		quantity = rand.Intn(150) + 10
+	}
+	if side == "SELL" {
+		price = int(100.0 + 15.0*rand.NormFloat64())
+	} else {
+		price = int(250.0 + 50.0*rand.NormFloat64())
+	}
+	amount = quantity * price
 	if timestamp.Second()%4 == 0 {
 		symbol = "KXCV"
 	} else {
@@ -132,7 +140,7 @@ func (p *Producer) generateMessage(t time.Time) []byte {
 
 	fmt.Fprintf(&buf,
 		`{"time":"%s", "symbol":"%s", "side":"%s", "quantity":%d, "price":%d, "amount":%d, "account":"%s"}`,
-		timestamp.UTC().Add(-(time.Duration(rand.Intn(5)) * time.Minute)).Format(time.RFC3339),
+		timestamp.UTC().Add(+timeshift).Format(time.RFC3339),
 		symbol,
 		side,
 		quantity,
